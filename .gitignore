@@ -8,3 +8,4 @@ artifacts/
 .idea/
 .vscode/
 Thumbs.db
+*.egg-info/
