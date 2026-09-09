@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+src/deepvoice_diffusion/__init__.py
+src/deepvoice_diffusion/audio.py
+src/deepvoice_diffusion/config.py
+src/deepvoice_diffusion/dataset.py
+src/diffusion_deepvoice_prototype.egg-info/PKG-INFO
+src/diffusion_deepvoice_prototype.egg-info/SOURCES.txt
+src/diffusion_deepvoice_prototype.egg-info/dependency_links.txt
+src/diffusion_deepvoice_prototype.egg-info/requires.txt
+src/diffusion_deepvoice_prototype.egg-info/top_level.txt
+tests/test_audio.py

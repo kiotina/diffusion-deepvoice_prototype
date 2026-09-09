@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diffusion-deepvoice-prototype"
+version = "0.1.0"
+description = "Real-only diffusion deepvoice detection prototype"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+  "librosa>=0.10.2,<0.12",
+  "matplotlib>=3.8,<4",
+  "numpy>=1.26,<3",
+  "PyYAML>=6,<7",
+  "soundfile>=0.12,<0.14",
+  "tqdm>=4.66,<5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

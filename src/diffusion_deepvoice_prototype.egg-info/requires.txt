@@ -1,0 +1,9 @@
+librosa<0.12,>=0.10.2
+matplotlib<4,>=3.8
+numpy<3,>=1.26
+PyYAML<7,>=6
+soundfile<0.14,>=0.12
+tqdm<5,>=4.66
+
+[dev]
+pytest<9,>=8
