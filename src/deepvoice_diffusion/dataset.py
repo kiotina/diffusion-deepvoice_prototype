@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 
@@ -28,3 +29,31 @@ def select_files(files: list[Path], minimum: int, maximum: int | None) -> list[P
 
     # maximum이 None이면 현재 발견한 1,819개를 모두 사용한다.
     return files if maximum is None else files[:maximum]
+
+
+def split_files(
+    files: list[Path],
+    train_ratio: float,
+    validation_ratio: float,
+    test_ratio: float,
+    seed: int,
+) -> dict[str, list[Path]]:
+    """원본 파일을 재현 가능한 train/validation/test 그룹으로 나눈다."""
+    if len(files) < 3:
+        raise ValueError("At least three files are required to create all splits")
+    ratios = (train_ratio, validation_ratio, test_ratio)
+    if any(ratio <= 0 for ratio in ratios) or not abs(sum(ratios) - 1.0) < 1e-9:
+        raise ValueError("split ratios must be positive and sum to 1")
+
+    shuffled = list(files)
+    random.Random(seed).shuffle(shuffled)
+    validation_count = max(1, round(len(shuffled) * validation_ratio))
+    test_count = max(1, round(len(shuffled) * test_ratio))
+    train_count = len(shuffled) - validation_count - test_count
+    if train_count < 1:
+        raise ValueError("split ratios leave no training files")
+    return {
+        "train": shuffled[:train_count],
+        "validation": shuffled[train_count : train_count + validation_count],
+        "test": shuffled[train_count + validation_count :],
+    }

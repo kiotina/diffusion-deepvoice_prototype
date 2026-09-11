@@ -18,11 +18,11 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from deepvoice_diffusion.audio import (  # noqa: E402
     load_waveform,
-    make_training_segment,
+    make_training_segments,
     segment_to_logmel,
 )
 from deepvoice_diffusion.config import load_config  # noqa: E402
-from deepvoice_diffusion.dataset import find_wav_files, select_files  # noqa: E402
+from deepvoice_diffusion.dataset import find_wav_files, select_files, split_files  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,26 +38,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def output_name(index: int, path: Path, input_dir: Path) -> str:
-    """긴 한글 원본명 대신 순번과 경로 hash로 안정적인 출력 파일명을 만든다."""
+def output_name(path: Path, input_dir: Path, segment_index: int) -> str:
+    """원본 경로 hash와 구간 번호로 안정적인 출력 파일명을 만든다."""
     relative = path.relative_to(input_dir).as_posix()
-    # 같은 상대 경로는 항상 같은 10자리 식별자를 만든다.
     digest = hashlib.sha1(relative.encode("utf-8")).hexdigest()[:10]
-    return f"{index:05d}_{digest}.npy"
-
-
-def random_generator_for_file(
-    path: Path,
-    input_dir: Path,
-    base_seed: int,
-) -> np.random.Generator:
-    """파일별로 독립적이면서 재현 가능한 난수 생성기를 만든다."""
-    relative = path.relative_to(input_dir).as_posix()
-    # 공통 seed와 파일 경로를 함께 hash한다. 파일 목록의 순서가 바뀌어도
-    # 같은 파일은 같은 random crop 시작점을 갖는다.
-    seed_material = f"{base_seed}:{relative}".encode("utf-8")
-    file_seed = int.from_bytes(hashlib.sha256(seed_material).digest()[:8], "little")
-    return np.random.default_rng(file_seed)
+    return f"{digest}_segment{segment_index:03d}.npy"
 
 
 def main() -> None:
@@ -73,80 +58,96 @@ def main() -> None:
     )
     if args.limit is not None:
         # --limit은 전체 실행 전 소수 파일로 빠르게 확인할 때만 사용한다.
-        if args.limit < 1:
-            raise ValueError("--limit must be positive")
+        if args.limit < 3:
+            raise ValueError("--limit must be at least 3 so every split has a file")
         files = files[: args.limit]
+
+    partitions = split_files(
+        files,
+        config.dataset.train_ratio,
+        config.dataset.validation_ratio,
+        config.dataset.test_ratio,
+        config.dataset.split_seed,
+    )
 
     # 3) Mel과 mask를 분리해 저장할 출력 폴더를 준비한다.
     output_dir = args.output_dir or config.dataset.output_dir
     if not output_dir.is_absolute():
         output_dir = (config.project_root / output_dir).resolve()
-    mel_dir = output_dir / "mels"
-    mask_dir = output_dir / "masks"
-    mel_dir.mkdir(parents=True, exist_ok=True)
-    mask_dir.mkdir(parents=True, exist_ok=True)
+    split_dirs: dict[str, dict[str, Path]] = {}
+    for split_name in partitions:
+        mel_dir = output_dir / split_name / "mels"
+        mask_dir = output_dir / split_name / "masks"
+        mel_dir.mkdir(parents=True, exist_ok=True)
+        mask_dir.mkdir(parents=True, exist_ok=True)
+        split_dirs[split_name] = {"mels": mel_dir, "masks": mask_dir}
 
     # manifest의 각 행, 실패 내역, 출력 shape 통계를 실행 중에 모은다.
     rows: list[dict[str, object]] = []
     failures: list[dict[str, str]] = []
     shapes: Counter[str] = Counter()
     mask_shapes: Counter[str] = Counter()
+    split_statistics = {
+        name: {"source_files": len(paths), "processed_sources": 0, "segments": 0, "padded_segments": 0, "discarded_tails": 0}
+        for name, paths in partitions.items()
+    }
 
-    for index, source_path in enumerate(tqdm(files, desc="Creating log-Mels")):
-        try:
-            # 원본 길이와 sample rate는 manifest 기록용이다.
-            source_info = sf.info(source_path)
+    for split_name, split_sources in partitions.items():
+        for source_path in tqdm(split_sources, desc=f"Creating {split_name} log-Mels"):
+            try:
+                source_info = sf.info(source_path)
+                waveform = load_waveform(source_path, config.audio)
+                segments = make_training_segments(waveform, config.audio)
+                remainder = waveform.shape[0] % config.audio.target_samples
+                if 0 < remainder < config.audio.minimum_remainder_samples:
+                    split_statistics[split_name]["discarded_tails"] += 1
 
-            # 4) WAV를 16 kHz mono float32 waveform으로 읽는다.
-            waveform = load_waveform(source_path, config.audio)
+                for segment_index, segment in enumerate(segments):
+                    mel, frame_mask = segment_to_logmel(segment, config.audio, config.mel)
+                    filename = output_name(
+                        source_path,
+                        config.dataset.input_dir,
+                        segment_index,
+                    )
+                    destination = split_dirs[split_name]["mels"] / filename
+                    mask_destination = split_dirs[split_name]["masks"] / filename
+                    np.save(destination, mel, allow_pickle=False)
+                    np.save(mask_destination, frame_mask, allow_pickle=False)
 
-            # 5) 파일 전용 난수 생성기로 긴 음성의 random crop 위치를 결정한다.
-            rng = random_generator_for_file(
-                source_path,
-                config.dataset.input_dir,
-                config.audio.random_seed,
-            )
-            segment = make_training_segment(waveform, config.audio, rng)
-
-            # 6) 고정 4초 구간을 log-Mel로 바꾸고 padding frame mask도 만든다.
-            mel, frame_mask = segment_to_logmel(segment, config.audio, config.mel)
-
-            # 7) Mel과 mask가 같은 파일명을 사용하도록 저장 경로를 만든다.
-            filename = output_name(index, source_path, config.dataset.input_dir)
-            destination = mel_dir / filename
-            mask_destination = mask_dir / filename
-            np.save(destination, mel, allow_pickle=False)
-            np.save(mask_destination, frame_mask, allow_pickle=False)
-
-            # 모든 결과가 예상한 shape인지 summary에서 한눈에 확인하기 위한 통계다.
-            shapes[str(tuple(mel.shape))] += 1
-            mask_shapes[str(tuple(frame_mask.shape))] += 1
-            # crop 위치와 유효 frame 비율까지 기록해 나중에 각 결과를 추적할 수 있다.
-            rows.append(
-                {
-                    "index": index,
-                    "source_path": str(source_path),
-                    "mel_path": str(destination),
-                    "mask_path": str(mask_destination),
-                    "source_duration_seconds": round(float(source_info.duration), 6),
-                    "source_sample_rate": source_info.samplerate,
-                    "source_start_seconds": round(
-                        segment.source_start_sample / config.audio.sample_rate,
-                        6,
-                    ),
-                    "valid_samples": segment.valid_samples,
-                    "valid_frames": int(frame_mask.sum()),
-                    "valid_frame_ratio": round(float(frame_mask.mean()), 6),
-                    "shape": "x".join(map(str, mel.shape)),
-                    "mask_shape": "x".join(map(str, frame_mask.shape)),
-                    "dtype": str(mel.dtype),
-                    "min": float(mel.min()),
-                    "max": float(mel.max()),
-                }
-            )
-        except Exception as exc:
-            # 한 파일이 깨져 있어도 나머지는 계속 처리하고 실패 목록에 기록한다.
-            failures.append({"path": str(source_path), "error": str(exc)})
+                    shapes[str(tuple(mel.shape))] += 1
+                    mask_shapes[str(tuple(frame_mask.shape))] += 1
+                    is_padded = segment.valid_samples < config.audio.target_samples
+                    split_statistics[split_name]["segments"] += 1
+                    split_statistics[split_name]["padded_segments"] += int(is_padded)
+                    start_seconds = segment.source_start_sample / config.audio.sample_rate
+                    valid_duration = segment.valid_samples / config.audio.sample_rate
+                    rows.append(
+                        {
+                            "index": len(rows),
+                            "split": split_name,
+                            "source_path": str(source_path),
+                            "segment_index": segment_index,
+                            "source_start_seconds": round(start_seconds, 6),
+                            "source_end_seconds": round(start_seconds + valid_duration, 6),
+                            "valid_duration_seconds": round(valid_duration, 6),
+                            "is_padded": is_padded,
+                            "mel_path": str(destination),
+                            "mask_path": str(mask_destination),
+                            "source_duration_seconds": round(float(source_info.duration), 6),
+                            "source_sample_rate": source_info.samplerate,
+                            "valid_samples": segment.valid_samples,
+                            "valid_frames": int(frame_mask.sum()),
+                            "valid_frame_ratio": round(float(frame_mask.mean()), 6),
+                            "shape": "x".join(map(str, mel.shape)),
+                            "mask_shape": "x".join(map(str, frame_mask.shape)),
+                            "dtype": str(mel.dtype),
+                            "min": float(mel.min()),
+                            "max": float(mel.max()),
+                        }
+                    )
+                split_statistics[split_name]["processed_sources"] += 1
+            except Exception as exc:
+                failures.append({"path": str(source_path), "error": str(exc)})
 
     # 8) 원본 WAV, Mel, mask의 대응 관계를 CSV로 저장한다.
     manifest_path = output_dir / "manifest.csv"
@@ -161,12 +162,16 @@ def main() -> None:
         "input_dir": str(config.dataset.input_dir),
         "output_dir": str(output_dir),
         "requested_files": len(files),
-        "processed_files": len(rows),
+        "processed_files": sum(
+            int(stats["processed_sources"]) for stats in split_statistics.values()
+        ),
+        "generated_segments": len(rows),
         "failed_files": failures,
+        "splits": split_statistics,
         "shapes": dict(shapes),
         "mask_shapes": dict(mask_shapes),
-        "crop_mode": config.audio.crop_mode,
-        "random_seed": config.audio.random_seed,
+        "split_seed": config.dataset.split_seed,
+        "minimum_remainder_seconds": config.audio.minimum_remainder_seconds,
         "inference_overlap_seconds": config.audio.inference_overlap_seconds,
         "normalization_range": [-1.0, 1.0],
         "config": {
@@ -192,9 +197,12 @@ def main() -> None:
     # 출력 파일을 먼저 남긴 뒤 실패 사실을 종료 코드로도 알린다.
     if failures:
         raise RuntimeError(f"Preprocessing failed for {len(failures)} file(s).")
-    if args.limit is None and len(rows) < config.dataset.min_samples:
+    processed_files = sum(
+        int(stats["processed_sources"]) for stats in split_statistics.values()
+    )
+    if args.limit is None and processed_files < config.dataset.min_samples:
         raise RuntimeError(
-            f"Only {len(rows):,} files were processed; minimum is {config.dataset.min_samples:,}."
+            f"Only {processed_files:,} files were processed; minimum is {config.dataset.min_samples:,}."
         )
 
 

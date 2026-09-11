@@ -67,7 +67,7 @@ def make_segment(
 
     source_samples = waveform.shape[0]
     if source_samples >= target_samples:
-        # 원본이 충분히 길면 padding 없이 지정된 시작점에서 정확히 4초를 자른다.
+        # 원본이 충분히 길면 padding 없이 지정된 시작점에서 고정 길이만큼 자른다.
         maximum_start = source_samples - target_samples
         if start_sample is None:
             # 시작점이 없으면 검사 이미지처럼 재현성이 필요한 용도로 중앙을 사용한다.
@@ -77,19 +77,17 @@ def make_segment(
                 f"start_sample must be between 0 and {maximum_start}, got {start_sample}"
             )
         segment = waveform[start_sample : start_sample + target_samples]
-        # 잘라낸 4초 전체가 실제 음성이므로 모든 sample이 유효하다.
+        # 잘라낸 구간 전체가 실제 음성이므로 모든 sample이 유효하다.
         mask = np.ones(target_samples, dtype=np.float32)
     else:
-        # 원본이 4초보다 짧으면 부족한 길이를 좌우에 가능한 한 균등하게 나눈다.
+        # 원본이 목표보다 짧으면 시간 위치를 유지하도록 오른쪽에만 padding한다.
         start_sample = 0
-        difference = target_samples - source_samples
-        left = difference // 2
-        right = difference - left
-        segment = np.pad(waveform, (left, right))
+        right = target_samples - source_samples
+        segment = np.pad(waveform, (0, right))
         # waveform과 똑같은 위치에 0을 채워 padding 영역을 표시한다.
         mask = np.pad(
             np.ones(source_samples, dtype=np.float32),
-            (left, right),
+            (0, right),
         )
 
     return AudioSegment(
@@ -100,39 +98,55 @@ def make_segment(
     )
 
 
-def make_training_segment(
+def make_training_segments(
     waveform: np.ndarray,
     config: AudioConfig,
-    rng: np.random.Generator,
-) -> AudioSegment:
-    """학습용 구간을 만든다. 긴 음성은 설정에 따라 random 또는 center crop한다."""
-    start_sample: int | None = None
-    if waveform.shape[0] > config.target_samples:
-        maximum_start = waveform.shape[0] - config.target_samples
-        if config.crop_mode == "random":
-            # 끝 위치도 선택 후보에 포함하기 위해 상한에 1을 더한다.
-            start_sample = int(rng.integers(0, maximum_start + 1))
-        else:
-            start_sample = maximum_start // 2
-    return make_segment(
-        waveform,
-        config.target_samples,
-        start_sample=start_sample,
-    )
+) -> list[AudioSegment]:
+    """앞에서부터 겹치지 않는 고정 길이 학습 구간들을 만든다."""
+    if waveform.ndim != 1:
+        raise ValueError(f"Expected mono waveform, got shape {waveform.shape}")
+    if waveform.size == 0:
+        raise ValueError("Cannot segment an empty waveform")
+
+    target = config.target_samples
+    hop = config.segment_hop_samples
+    segments = [
+        make_segment(waveform, target, start_sample=start)
+        for start in range(0, waveform.shape[0] - target + 1, hop)
+    ]
+
+    # 마지막 완전한 구간 다음에 남은 음성은 1초 이상일 때만 오른쪽을 padding한다.
+    remainder_start = len(segments) * hop
+    remainder_samples = waveform.shape[0] - remainder_start
+    if config.minimum_remainder_samples <= remainder_samples < target:
+        remainder = waveform[remainder_start:]
+        padding = target - remainder_samples
+        segments.append(
+            AudioSegment(
+                waveform=np.pad(remainder, (0, padding)).astype(np.float32, copy=False),
+                sample_mask=np.pad(
+                    np.ones(remainder_samples, dtype=np.float32),
+                    (0, padding),
+                ),
+                source_start_sample=remainder_start,
+                source_samples=waveform.shape[0],
+            )
+        )
+    return segments
 
 
 def make_inference_segments(
     waveform: np.ndarray,
     config: AudioConfig,
 ) -> list[AudioSegment]:
-    """긴 사용자 음성 전체를 겹치는 4초 모델 입력들로 분할한다."""
+    """긴 사용자 음성 전체를 겹치는 고정 길이 모델 입력들로 분할한다."""
     target = config.target_samples
     if waveform.shape[0] <= target:
-        # 4초 이하라면 한 구간만 만들고, 짧은 부분은 mask와 함께 padding한다.
+        # 목표 길이 이하라면 한 구간만 만들고, 짧은 부분은 mask와 함께 padding한다.
         return [make_segment(waveform, target)]
 
     last_start = waveform.shape[0] - target
-    # 현재 hop은 2초이므로 0, 2, 4, ...초 위치에서 4초 창을 만든다.
+    # 현재는 2초 창을 1초씩 이동시켜 50% 겹치는 추론 구간을 만든다.
     starts = list(range(0, last_start + 1, config.inference_hop_samples))
     if starts[-1] != last_start:
         # 마지막 창이 음성 끝에 정확히 닿지 않으면 끝에 맞춘 창을 하나 더 추가한다.
@@ -144,7 +158,7 @@ def make_inference_segments(
 
 
 def fit_duration(waveform: np.ndarray, target_samples: int) -> np.ndarray:
-    """기존 호출 호환용 함수: 중앙 crop 또는 대칭 padding한 waveform만 반환한다."""
+    """기존 호출 호환용 함수: 중앙 crop 또는 오른쪽 padding한 waveform만 반환한다."""
     return make_segment(waveform, target_samples).waveform
 
 
@@ -153,7 +167,7 @@ def waveform_to_logmel(
     audio_config: AudioConfig,
     mel_config: MelConfig,
 ) -> np.ndarray:
-    """4초 waveform을 (1, 80, 251) 크기의 정규화된 log-Mel로 바꾼다."""
+    """고정 길이 waveform을 정규화된 log-Mel로 바꾼다."""
     # power=2.0이므로 진폭이 아니라 에너지를 표현하는 power spectrogram이다.
     # center=True는 각 frame의 시점을 분석 창 중앙으로 맞춘다.
     mel_power = librosa.feature.melspectrogram(
@@ -187,7 +201,7 @@ def sample_mask_to_frame_mask(
     frame_count: int,
     mel_config: MelConfig,
 ) -> np.ndarray:
-    """sample 단위 mask를 (1, 1, 251) Mel 시간-frame mask로 바꾼다."""
+    """sample 단위 mask를 Mel 시간-frame mask로 바꾼다."""
     # center=True인 Mel의 t번째 frame 중심은 대략 t * hop_length sample에 있다.
     centers = np.arange(frame_count, dtype=np.int64) * mel_config.hop_length
     # 마지막 frame 중심이 배열 끝과 같아질 수 있으므로 유효 index로 제한한다.

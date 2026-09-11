@@ -2,23 +2,28 @@ dataset:
   # 전처리할 원본 Real WAV 폴더
   input_dir: D:/Workspace/Mel-spectrogram_MFCC/data/raw/real
   # Mel과 mask가 저장될 위치. 상대 경로는 프로젝트 루트 기준이다.
-  output_dir: data/processed/real_mels
+  output_dir: data/processed/real_mels_2s
   # 원본이 이 개수보다 적으면 실수로 작은 데이터셋을 학습하지 않도록 중단한다.
   min_samples: 1000
   # null이면 발견한 파일을 전부 사용한다.
   max_samples: null
+  # 원본 파일을 먼저 분할해 같은 녹음의 구간들이 서로 다른 split에 섞이지 않게 한다.
+  train_ratio: 0.8
+  validation_ratio: 0.1
+  test_ratio: 0.1
+  split_seed: 42
 
 audio:
   # 모든 입력을 16 kHz로 통일한다. 현재 원본도 이미 16 kHz이다.
   sample_rate: 16000
   # diffusion 모델이 한 번에 볼 고정 길이
-  duration_seconds: 4.0
-  # 4초보다 긴 학습 음성에서 임의의 4초 구간을 선택한다.
-  crop_mode: random
-  # 파일별 random crop을 다시 실행해도 동일하게 재현하기 위한 기준값
-  random_seed: 42
-  # 추론 시 4초 창끼리 2초가 겹치므로 실제 이동 간격도 2초가 된다.
-  inference_overlap_seconds: 2.0
+  duration_seconds: 2.0
+  # 학습 구간은 서로 겹치지 않게 2초씩 이동한다.
+  segment_hop_seconds: 2.0
+  # 마지막에 1초 이상 남으면 2초까지 오른쪽을 padding하고, 1초 미만이면 버린다.
+  minimum_remainder_seconds: 1.0
+  # 추론 시에는 2초 창끼리 1초를 겹쳐 전체 구간을 검사한다.
+  inference_overlap_seconds: 1.0
   # 녹음 환경과 원래의 무음 구간을 보존하기 위해 현재는 끈 상태이다.
   trim_silence: false
   # trim_silence가 true일 때만 사용하는 무음 판단 기준

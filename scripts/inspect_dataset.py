@@ -87,7 +87,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    # 첫 WAV의 중앙 4초를 실제 전처리와 같은 방식으로 변환해 그림으로 확인한다.
+    # 첫 WAV의 중앙 2초를 실제 전처리와 같은 방식으로 변환해 그림으로 확인한다.
     sample_mel = audio_file_to_logmel(files[0], config.audio, config.mel)[0]
     image_path = artifacts_dir / "sample_logmel.png"
     plt.figure(figsize=(11, 4))
