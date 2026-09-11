@@ -2,7 +2,7 @@
 
 Real 음성만으로 diffusion 기반 deepvoice 이상 탐지를 검증하기 위한 최소 프로토타입입니다.
 
-현재 단계에서는 원본 WAV를 검사하고, 학습에 바로 사용할 수 있는 고정 크기 log-Mel spectrogram으로 전처리합니다. Git 저장소 초기화와 원격 저장소 연결은 프로젝트 구조가 안정된 뒤 진행합니다.
+원본 WAV를 고정 크기 log-Mel spectrogram으로 전처리하고, PyTorch U-Net이 diffusion 과정에서 추가한 noise를 예측하도록 학습합니다. 현재는 학습 파이프라인을 확인하는 단계이며, 실제 deepvoice 탐지 성능 평가는 아직 포함하지 않습니다.
 
 ## 확인된 데이터
 
@@ -38,7 +38,7 @@ python -m pip install --upgrade pip
 pip install -e ".[dev]"
 ```
 
-PyTorch는 다음 모델 단계에서 사용하는 장치(CPU/CUDA)에 맞춰 별도로 설치합니다.
+PyTorch는 사용하는 장치(CPU/CUDA)에 맞춰 별도로 설치합니다. 설치 방법과 학습 실행은 [학습 안내](docs/training.md)를 참고하세요. 현재 프로젝트의 conda 기반 환경은 `.venv/python.exe`를 사용하며, 위의 일반 venv 환경은 `.venv/Scripts/python.exe`를 사용합니다.
 
 ## 실행
 

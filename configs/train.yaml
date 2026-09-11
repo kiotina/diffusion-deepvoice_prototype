@@ -1,0 +1,21 @@
+# 경로는 프로젝트 루트 기준이다. 기존 split을 다시 나누지 않는다.
+manifest_path: data/processed/real_mels_2s/manifest.csv
+output_dir: artifacts/training
+base_channels: 32
+time_dim: 128
+timesteps: 1000
+beta_start: 0.0001
+beta_end: 0.02
+batch_size: 8
+learning_rate: 0.0001
+weight_decay: 0.0001
+epochs: 30
+patience: 5
+gradient_clip: 1.0
+seed: 42
+# 검증은 학습과 다른 seed와 고정 epoch를 사용한다.
+validation_seed: 10042
+device: auto
+cpu_threads: 4
+# 예기치 않은 종료 시 마지막 저장 배치부터 복구한다.
+checkpoint_every: 50
