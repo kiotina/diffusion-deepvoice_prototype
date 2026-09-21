@@ -1,3 +1,4 @@
+# 전처리 결과 검증
 """전처리 재현성과 checkpoint에 연결할 입력 계약."""
 from __future__ import annotations
 

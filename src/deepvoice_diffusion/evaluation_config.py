@@ -1,3 +1,4 @@
+# 평가 설정 관리
 """WAV 평가 설정과 명령행 override의 공통 검증."""
 from __future__ import annotations
 

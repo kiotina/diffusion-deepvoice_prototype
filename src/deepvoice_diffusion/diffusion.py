@@ -1,3 +1,4 @@
+# diffusion noise와 loss 계산
 """DDPM forward 과정과 실제 음성 위치만 사용하는 손실."""
 from __future__ import annotations
 

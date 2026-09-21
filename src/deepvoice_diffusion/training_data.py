@@ -1,3 +1,4 @@
+# 학습 데이터 로딩
 """전처리 manifest의 분할을 그대로 사용하는 학습 데이터."""
 from __future__ import annotations
 

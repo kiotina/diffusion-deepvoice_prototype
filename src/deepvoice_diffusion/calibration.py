@@ -1,3 +1,4 @@
+# 판정 임계값 관리
 """real validation WAV 점수의 분위수로 임계값을 만들고 사용 조건을 확인한다."""
 from __future__ import annotations
 

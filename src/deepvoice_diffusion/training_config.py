@@ -1,3 +1,5 @@
+# 학습 설정 관리
+
 from __future__ import annotations
 
 import math

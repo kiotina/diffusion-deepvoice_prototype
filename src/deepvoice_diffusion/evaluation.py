@@ -1,3 +1,4 @@
+# 판정 결과와 평가 지표 관리
 """파일별 판정, 검증된 라벨의 지표, JSON/CSV 보고서."""
 from __future__ import annotations
 

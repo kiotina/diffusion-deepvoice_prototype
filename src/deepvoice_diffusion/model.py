@@ -1,3 +1,4 @@
+# noise 예측 U-Net 모델
 """2초 Mel의 noise를 예측하는 작은 U-Net. 출력은 분류 확률이 아니다."""
 from __future__ import annotations
 

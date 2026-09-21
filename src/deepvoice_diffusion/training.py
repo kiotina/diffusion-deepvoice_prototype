@@ -1,3 +1,4 @@
+# 모델 학습과 검증 실행
 """학습/검증 실행. epoch와 배치 커서를 저장해 안전한 지점에서 재개한다."""
 from __future__ import annotations
 
