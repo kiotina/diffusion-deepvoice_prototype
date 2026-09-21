@@ -7,17 +7,22 @@ from pathlib import Path
 import torch
 
 
-def save_checkpoint(path: Path, model, optimizer, state, config, fingerprints):
+def save_checkpoint(path: Path, model, optimizer, state, config, fingerprints, preprocess_contract=None):
     payload = {
-        "format_version": 1,
+        "format_version": 2 if preprocess_contract is not None else 1,
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
         "state": state,
         "config": config,
+        "torch_version": str(torch.__version__),
         "fingerprints": fingerprints,
         "torch_rng": torch.get_rng_state(),
         "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
     }
+    if preprocess_contract is not None:
+        if preprocess_contract.get("verification") != "full":
+            raise ValueError("Checkpoint v2 requires a fully verified preprocessing contract")
+        payload["preprocess_contract"] = preprocess_contract
     temporary = path.with_suffix(path.suffix + ".tmp")
     torch.save(payload, temporary)
     os.replace(temporary, path)
@@ -25,8 +30,10 @@ def save_checkpoint(path: Path, model, optimizer, state, config, fingerprints):
 
 def load_checkpoint(path: Path):
     payload = torch.load(path, map_location="cpu", weights_only=True)
-    if payload.get("format_version") != 1:
+    if payload.get("format_version") not in {1, 2}:
         raise ValueError("Unsupported checkpoint format")
+    if payload["format_version"] == 2 and payload.get("preprocess_contract", {}).get("verification") != "full":
+        raise ValueError("Checkpoint v2 has no verified preprocessing contract")
     return payload
 
 

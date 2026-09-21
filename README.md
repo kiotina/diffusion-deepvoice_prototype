@@ -2,7 +2,7 @@
 
 Real 음성만으로 diffusion 기반 deepvoice 이상 탐지를 검증하기 위한 최소 프로토타입입니다.
 
-원본 WAV를 고정 크기 log-Mel spectrogram으로 전처리하고, PyTorch U-Net이 diffusion 과정에서 추가한 noise를 예측하도록 학습합니다. 현재는 학습 파이프라인을 확인하는 단계이며, 실제 deepvoice 탐지 성능 평가는 아직 포함하지 않습니다.
+원본 WAV를 고정 크기 log-Mel spectrogram으로 전처리하고, PyTorch U-Net이 diffusion 과정에서 추가한 noise를 예측하도록 학습합니다. WAV 이상 점수·임계값 판정·파일 단위 평가 기능을 제공하지만, 현재 smoke 모델과 미확인 외부 음성으로 실제 deepfake 탐지 성능은 확정할 수 없습니다.
 
 ## 확인된 데이터
 
@@ -61,3 +61,6 @@ pytest
 - 이후 학습 loss에 mask를 곱하면 padding에 해당하는 시간 프레임을 학습에서 제외할 수 있습니다.
 - 긴 사용자 음성은 `make_inference_segments()`로 50% 겹치는 2초 구간들로 나눌 수 있습니다.
 - 파일별 최대값 기준 dB 정규화는 녹음 환경 보존 방향을 결정할 때 다시 검토합니다.
+## WAV 이상 점수·평가
+
+실행 순서와 결과 해석은 [평가 안내](docs/evaluation.md)를 참고하세요.

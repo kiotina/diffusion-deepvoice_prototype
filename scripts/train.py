@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from deepvoice_diffusion.checkpoint import load_checkpoint  # noqa: E402
+from deepvoice_diffusion.data_contract import contract_path  # noqa: E402
 from deepvoice_diffusion.training import fit  # noqa: E402
 from deepvoice_diffusion.training_config import TrainingConfig, load_training_config, project_path  # noqa: E402
 
@@ -23,10 +24,11 @@ def main():
     parser.add_argument("--resume", type=Path, help="Resume the saved run from its last.pt")
     parser.add_argument("--epochs", type=int, help="Maximum epochs; may be increased on resume")
     parser.add_argument("--max-steps", type=int, help="Maximum optimizer updates in this invocation")
+    parser.add_argument("--manifest", type=Path, help="Use an already prepared split manifest")
     args = parser.parse_args()
     if args.resume:
-        if args.config or args.smoke:
-            parser.error("--resume uses saved configuration; do not combine with --config or --smoke")
+        if args.config or args.smoke or args.manifest:
+            parser.error("--resume uses saved configuration; do not combine with --config, --smoke or --manifest")
         args.resume = project_path(args.resume)
         config = TrainingConfig(**load_checkpoint(args.resume)["config"])
     else:
@@ -37,8 +39,13 @@ def main():
             args.max_steps = min(args.max_steps, 20) if args.max_steps is not None else 20
     if args.epochs is not None:
         config = replace(config, epochs=args.epochs)
+    if args.manifest:
+        config = replace(config, manifest_path=str(args.manifest))
     if args.output_dir:
         config = replace(config, output_dir=str(args.output_dir))
+    if args.resume is None and not args.smoke and config.train_limit is None and config.validation_limit is None:
+        if not contract_path(project_path(config.manifest_path)).is_file():
+            parser.error("Full training requires a verified preprocess_contract.json; run evaluate.py prepare --verify-contract first")
     try:
         report = fit(config, resume=args.resume, max_steps=args.max_steps)
     except KeyboardInterrupt:

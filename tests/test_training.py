@@ -24,6 +24,8 @@ def test_mid_epoch_resume_matches_uninterrupted_training(tmp_path):
     partial = fit(resumed_config, max_steps=1)
     assert partial["next_batch"] == 1 and partial["completed_epochs"] == 0
     checkpoint = tmp_path / "resumed/last.pt"
+    # 오래된 v1 재개는 새 전처리 계약이 없거나 잘못되어도 당시 규칙을 유지한다.
+    (tmp_path / "preprocess_contract.json").write_text("invalid", encoding="utf-8")
     finished = fit(resumed_config, resume=checkpoint)
     assert finished["total_steps"] == full["total_steps"] == 4
     expected = load_checkpoint(tmp_path / "continuous/last.pt")

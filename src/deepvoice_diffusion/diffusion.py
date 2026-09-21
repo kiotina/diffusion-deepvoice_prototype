@@ -45,6 +45,21 @@ def masked_mse(prediction, target, mask):
     return error / count
 
 
+def masked_mse_per_sample(prediction, target, mask):
+    """배치의 각 구간에서 유효 Mel 원소만 평균낸 MSE를 반환한다."""
+    if prediction.shape != target.shape or prediction.ndim != 4:
+        raise ValueError("Prediction and target must have identical 4D shapes")
+    expected = (prediction.shape[0], 1, 1, prediction.shape[-1])
+    if tuple(mask.shape) != expected:
+        raise ValueError(f"Mask shape must be {expected}")
+    expanded = mask.expand_as(prediction)
+    counts = expanded.sum(dim=(1, 2, 3))
+    if torch.any(counts <= 0):
+        raise ValueError("Each sample requires valid frames")
+    errors = torch.where(expanded.bool(), prediction - target, 0.0).square()
+    return errors.sum(dim=(1, 2, 3)) / counts
+
+
 def seeded_noise(clean, indices, timesteps: int, seed: int, epoch: int):
     """샘플별 난수: 배치 크기/순서가 달라져도 검증 입력을 동일하게 만든다.
 

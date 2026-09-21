@@ -1,0 +1,13 @@
+manifest_path: data/processed/real_mels_2s/manifest.csv
+preprocess_config: configs/preprocess.yaml
+external_dir: D:/Workspace/Mel-spectrogram_MFCC/data/raw/fake
+checkpoint: artifacts/training_smoke/best.pt
+output_dir: artifacts/evaluation
+# 검증 가능한 합성 출처를 확보한 뒤 별도 CSV(path,evidence)를 지정한다.
+verified_fake_manifest: null
+timesteps: [100, 300, 500]
+noise_seeds: [1729, 2718]
+batch_size: 8
+cpu_threads: 4
+quantile: 0.95
+minimum_calibration_files: 20

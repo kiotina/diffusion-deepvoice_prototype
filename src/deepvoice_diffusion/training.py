@@ -13,6 +13,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from .checkpoint import load_checkpoint, restore_checkpoint, save_checkpoint
+from .data_contract import load_verified_contract
 from .diffusion import DiffusionSchedule, masked_error, seeded_noise
 from .model import NoisePredictorUNet
 from .training_config import TrainingConfig, project_path
@@ -94,13 +95,19 @@ def fit(config: TrainingConfig, *, resume: Path | None = None, max_steps: int | 
     validation = MelDataset(rows, "validation", config.validation_limit)
     # Test의 split 메타데이터만 검사한다. Test 배열은 열거나 평가하지 않는다.
     fingerprints = {"train": train.fingerprint(), "validation": validation.fingerprint()}
+    resume_payload = load_checkpoint(resume) if resume is not None else None
+    # v1 재개는 당시의 전처리 계약 부재를 그대로 유지한다.
+    preprocess_contract = (None if resume_payload is not None and resume_payload["format_version"] == 1
+                           else load_verified_contract(config.manifest_path))
     model = NoisePredictorUNet(config.base_channels, config.time_dim).to(device)
     schedule = DiffusionSchedule(config.timesteps, config.beta_start, config.beta_end).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     state = dict(epoch=1, batch_cursor=0, step=0, error_sum=0.0, valid_count=0.0,
                  best_loss=None, bad_epochs=0, history=[])
     if resume is not None:
-        payload = load_checkpoint(resume)
+        payload = resume_payload
+        if payload["format_version"] == 2 and preprocess_contract != payload["preprocess_contract"]:
+            raise ValueError("Preprocessing contract changed since checkpoint")
         previous = payload["config"]
         for name, value in asdict(config).items():
             if name not in {"epochs", "device", "cpu_threads"} and previous[name] != value:
@@ -117,6 +124,7 @@ def fit(config: TrainingConfig, *, resume: Path | None = None, max_steps: int | 
     output_dir.mkdir(parents=True, exist_ok=True)
     run = dict(config=asdict(config), device=str(device), torch_version=str(torch.__version__),
                parameters=sum(p.numel() for p in model.parameters()), fingerprints=fingerprints,
+               checkpoint_format=2 if preprocess_contract is not None else 1,
                train_samples=len(train), validation_samples=len(validation),
                test_metadata_rows=sum(r["split"] == "test" for r in rows), test_evaluated=False)
     write_json(output_dir / "run_config.json", run)
@@ -128,7 +136,8 @@ def fit(config: TrainingConfig, *, resume: Path | None = None, max_steps: int | 
     invocation_start = time.perf_counter()
 
     def save_last():
-        save_checkpoint(output_dir / "last.pt", model, optimizer, state, asdict(config), fingerprints)
+        save_checkpoint(output_dir / "last.pt", model, optimizer, state, asdict(config),
+                        fingerprints, preprocess_contract)
 
     save_last()
     while state["epoch"] <= config.epochs:
@@ -183,7 +192,8 @@ def fit(config: TrainingConfig, *, resume: Path | None = None, max_steps: int | 
             state["bad_epochs"] = 0 if improved else state["bad_epochs"] + 1
             state.update(epoch=epoch+1, batch_cursor=0, error_sum=0.0, valid_count=0.0)
             if improved:
-                save_checkpoint(output_dir / "best.pt", model, optimizer, state, asdict(config), fingerprints)
+                save_checkpoint(output_dir / "best.pt", model, optimizer, state, asdict(config),
+                                fingerprints, preprocess_contract)
             save_history(output_dir, state["history"])
             print(f"epoch={epoch} train={row['train_loss']:.6f} validation={validation_loss:.6f}", flush=True)
         save_last()

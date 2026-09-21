@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8,<9"]
 training = ["torch>=2.7,<3"]
+evaluation = ["torch>=2.7,<3", "scikit-learn>=1.5,<2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
