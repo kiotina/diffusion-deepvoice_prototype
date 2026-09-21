@@ -45,6 +45,66 @@ def output_name(path: Path, input_dir: Path, segment_index: int) -> str:
     return f"{digest}_segment{segment_index:03d}.npy"
 
 
+def prepare_output_dirs(output_dir: Path, split_names) -> dict[str, dict[str, Path]]:
+    """새 전처리 결과가 기존 산출물과 섞이지 않도록 빈 출력 위치만 준비한다."""
+    if output_dir.exists():
+        if not output_dir.is_dir() or any(output_dir.iterdir()):
+            raise FileExistsError(f"Preprocess output must be missing or empty: {output_dir}")
+    split_dirs: dict[str, dict[str, Path]] = {}
+    for split_name in split_names:
+        mel_dir = output_dir / split_name / "mels"
+        mask_dir = output_dir / split_name / "masks"
+        mel_dir.mkdir(parents=True, exist_ok=True)
+        mask_dir.mkdir(parents=True, exist_ok=True)
+        split_dirs[split_name] = {"mels": mel_dir, "masks": mask_dir}
+    return split_dirs
+
+
+def process_source(source_path: Path, split_name: str, destinations, config):
+    """WAV 하나를 모든 학습 구간으로 변환하고 manifest 행을 만든다."""
+    source_info = sf.info(source_path)
+    waveform = load_waveform(source_path, config.audio)
+    segments = make_training_segments(waveform, config.audio)
+    remainder = waveform.shape[0] % config.audio.target_samples
+    discarded_tail = 0 < remainder < config.audio.minimum_remainder_samples
+    rows = []
+    shapes: Counter[str] = Counter()
+    mask_shapes: Counter[str] = Counter()
+    for segment_index, segment in enumerate(segments):
+        mel, frame_mask = segment_to_logmel(segment, config.audio, config.mel)
+        filename = output_name(source_path, config.dataset.input_dir, segment_index)
+        destination = destinations["mels"] / filename
+        mask_destination = destinations["masks"] / filename
+        np.save(destination, mel, allow_pickle=False)
+        np.save(mask_destination, frame_mask, allow_pickle=False)
+        shapes[str(tuple(mel.shape))] += 1
+        mask_shapes[str(tuple(frame_mask.shape))] += 1
+        start_seconds = segment.source_start_sample / config.audio.sample_rate
+        valid_duration = segment.valid_samples / config.audio.sample_rate
+        rows.append({
+            "split": split_name,
+            "source_path": str(source_path),
+            "segment_index": segment_index,
+            "source_start_seconds": round(start_seconds, 6),
+            "source_end_seconds": round(start_seconds + valid_duration, 6),
+            "valid_duration_seconds": round(valid_duration, 6),
+            "is_padded": segment.valid_samples < config.audio.target_samples,
+            "mel_path": str(destination),
+            "mask_path": str(mask_destination),
+            "source_duration_seconds": round(float(source_info.duration), 6),
+            "source_sample_rate": source_info.samplerate,
+            "valid_samples": segment.valid_samples,
+            "valid_frames": int(frame_mask.sum()),
+            "valid_frame_ratio": round(float(frame_mask.mean()), 6),
+            "shape": "x".join(map(str, mel.shape)),
+            "mask_shape": "x".join(map(str, frame_mask.shape)),
+            "dtype": str(mel.dtype),
+            "min": float(mel.min()),
+            "max": float(mel.max()),
+        })
+    return rows, discarded_tail, shapes, mask_shapes
+
+
 def main() -> None:
     # 1) YAML 설정을 읽고 입력 경로와 파라미터가 유효한지 검사한다.
     args = parse_args()
@@ -74,13 +134,7 @@ def main() -> None:
     output_dir = args.output_dir or config.dataset.output_dir
     if not output_dir.is_absolute():
         output_dir = (config.project_root / output_dir).resolve()
-    split_dirs: dict[str, dict[str, Path]] = {}
-    for split_name in partitions:
-        mel_dir = output_dir / split_name / "mels"
-        mask_dir = output_dir / split_name / "masks"
-        mel_dir.mkdir(parents=True, exist_ok=True)
-        mask_dir.mkdir(parents=True, exist_ok=True)
-        split_dirs[split_name] = {"mels": mel_dir, "masks": mask_dir}
+    split_dirs = prepare_output_dirs(output_dir, partitions)
 
     # manifest의 각 행, 실패 내역, 출력 shape 통계를 실행 중에 모은다.
     rows: list[dict[str, object]] = []
@@ -95,56 +149,18 @@ def main() -> None:
     for split_name, split_sources in partitions.items():
         for source_path in tqdm(split_sources, desc=f"Creating {split_name} log-Mels"):
             try:
-                source_info = sf.info(source_path)
-                waveform = load_waveform(source_path, config.audio)
-                segments = make_training_segments(waveform, config.audio)
-                remainder = waveform.shape[0] % config.audio.target_samples
-                if 0 < remainder < config.audio.minimum_remainder_samples:
-                    split_statistics[split_name]["discarded_tails"] += 1
-
-                for segment_index, segment in enumerate(segments):
-                    mel, frame_mask = segment_to_logmel(segment, config.audio, config.mel)
-                    filename = output_name(
-                        source_path,
-                        config.dataset.input_dir,
-                        segment_index,
-                    )
-                    destination = split_dirs[split_name]["mels"] / filename
-                    mask_destination = split_dirs[split_name]["masks"] / filename
-                    np.save(destination, mel, allow_pickle=False)
-                    np.save(mask_destination, frame_mask, allow_pickle=False)
-
-                    shapes[str(tuple(mel.shape))] += 1
-                    mask_shapes[str(tuple(frame_mask.shape))] += 1
-                    is_padded = segment.valid_samples < config.audio.target_samples
-                    split_statistics[split_name]["segments"] += 1
-                    split_statistics[split_name]["padded_segments"] += int(is_padded)
-                    start_seconds = segment.source_start_sample / config.audio.sample_rate
-                    valid_duration = segment.valid_samples / config.audio.sample_rate
-                    rows.append(
-                        {
-                            "index": len(rows),
-                            "split": split_name,
-                            "source_path": str(source_path),
-                            "segment_index": segment_index,
-                            "source_start_seconds": round(start_seconds, 6),
-                            "source_end_seconds": round(start_seconds + valid_duration, 6),
-                            "valid_duration_seconds": round(valid_duration, 6),
-                            "is_padded": is_padded,
-                            "mel_path": str(destination),
-                            "mask_path": str(mask_destination),
-                            "source_duration_seconds": round(float(source_info.duration), 6),
-                            "source_sample_rate": source_info.samplerate,
-                            "valid_samples": segment.valid_samples,
-                            "valid_frames": int(frame_mask.sum()),
-                            "valid_frame_ratio": round(float(frame_mask.mean()), 6),
-                            "shape": "x".join(map(str, mel.shape)),
-                            "mask_shape": "x".join(map(str, frame_mask.shape)),
-                            "dtype": str(mel.dtype),
-                            "min": float(mel.min()),
-                            "max": float(mel.max()),
-                        }
-                    )
+                source_rows, discarded_tail, source_shapes, source_mask_shapes = process_source(
+                    source_path, split_name, split_dirs[split_name], config
+                )
+                for row in source_rows:
+                    rows.append({"index": len(rows), **row})
+                shapes.update(source_shapes)
+                mask_shapes.update(source_mask_shapes)
+                split_statistics[split_name]["segments"] += len(source_rows)
+                split_statistics[split_name]["padded_segments"] += sum(
+                    int(row["is_padded"]) for row in source_rows
+                )
+                split_statistics[split_name]["discarded_tails"] += int(discarded_tail)
                 split_statistics[split_name]["processed_sources"] += 1
             except Exception as exc:
                 failures.append({"path": str(source_path), "error": str(exc)})

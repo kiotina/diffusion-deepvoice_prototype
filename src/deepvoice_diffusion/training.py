@@ -72,6 +72,30 @@ def save_history(output_dir, history):
         plt.close(fig)
 
 
+def train_step(model, optimizer, schedule, batch, config, device, epoch):
+    """학습 배치 하나에 noise를 넣고 예측 오차로 가중치를 한 번 수정한다."""
+    mel, mask = batch["mel"].to(device), batch["mask"].to(device)
+    steps, noise = seeded_noise(mel, batch["index"], schedule.timesteps, config.seed, epoch)
+    optimizer.zero_grad(set_to_none=True)
+    noisy = schedule.add_noise(mel, steps, noise, mask)
+    prediction = model(noisy, steps, mask)
+    error, valid_count = masked_error(prediction, noise, mask)
+    loss = error / valid_count
+    if not torch.isfinite(loss):
+        raise FloatingPointError("Non-finite training loss; resume from last.pt after diagnosis")
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clip, error_if_nonfinite=True)
+    optimizer.step()
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    return {
+        "loss": loss.item(),
+        "error": error.item(),
+        "valid_count": valid_count.item(),
+        "samples": mel.shape[0],
+    }
+
+
 def fit(config: TrainingConfig, *, resume: Path | None = None, max_steps: int | None = None):
     """max_steps는 이번 호출에서 허용하는 optimizer update 수이다."""
     if max_steps is not None and max_steps < 1:
@@ -153,29 +177,17 @@ def fit(config: TrainingConfig, *, resume: Path | None = None, max_steps: int | 
         model.train()
         for batch in loader:
             tick = time.perf_counter()
-            mel, mask = batch["mel"].to(device), batch["mask"].to(device)
-            steps, noise = seeded_noise(mel, batch["index"], config.timesteps, config.seed, epoch)
-            optimizer.zero_grad(set_to_none=True)
-            prediction = model(schedule.add_noise(mel, steps, noise, mask), steps, mask)
-            error, count = masked_error(prediction, noise, mask)
-            loss = error / count
-            if not torch.isfinite(loss):
-                raise FloatingPointError("Non-finite training loss; resume from last.pt after diagnosis")
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clip, error_if_nonfinite=True)
-            optimizer.step()
-            if device.type == "cuda":
-                torch.cuda.synchronize()
+            result = train_step(model, optimizer, schedule, batch, config, device, epoch)
             train_seconds += time.perf_counter() - tick
             measured_steps += 1
-            trained_samples += mel.shape[0]
+            trained_samples += result["samples"]
             state["step"] += 1
             state["batch_cursor"] += 1
-            state["error_sum"] += error.item()
-            state["valid_count"] += count.item()
+            state["error_sum"] += result["error"]
+            state["valid_count"] += result["valid_count"]
             if state["step"] % config.checkpoint_every == 0:
                 save_last()
-                print(f"epoch={epoch} batch={state['batch_cursor']}/{len(batches)} loss={loss.item():.5f}", flush=True)
+                print(f"epoch={epoch} batch={state['batch_cursor']}/{len(batches)} loss={result['loss']:.5f}", flush=True)
             if max_steps is not None and state["step"] - starting_step >= max_steps:
                 stop_reason = "step_limit"
                 break

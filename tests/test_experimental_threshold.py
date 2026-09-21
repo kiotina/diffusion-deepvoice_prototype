@@ -1,6 +1,6 @@
 import pytest
 
-from deepvoice_diffusion.experimental_threshold import choose_balanced_threshold, split_external_files
+from scripts.experiment_threshold import choose_balanced_threshold, split_external_files
 
 
 def test_balanced_threshold_uses_only_development_scores_and_tie_breaks_high():

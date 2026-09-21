@@ -21,9 +21,6 @@ class AudioSegment:
     sample_mask: np.ndarray
     # 긴 원본에서 이 구간을 잘라내기 시작한 sample 위치
     source_start_sample: int
-    # crop 또는 padding하기 전 원본 waveform의 전체 sample 수
-    source_samples: int
-
     @property
     def valid_samples(self) -> int:
         return int(self.sample_mask.sum())
@@ -94,7 +91,6 @@ def make_segment(
         waveform=segment.astype(np.float32, copy=False),
         sample_mask=mask,
         source_start_sample=start_sample,
-        source_samples=source_samples,
     )
 
 
@@ -120,16 +116,12 @@ def make_training_segments(
     remainder_samples = waveform.shape[0] - remainder_start
     if config.minimum_remainder_samples <= remainder_samples < target:
         remainder = waveform[remainder_start:]
-        padding = target - remainder_samples
+        padded = make_segment(remainder, target)
         segments.append(
             AudioSegment(
-                waveform=np.pad(remainder, (0, padding)).astype(np.float32, copy=False),
-                sample_mask=np.pad(
-                    np.ones(remainder_samples, dtype=np.float32),
-                    (0, padding),
-                ),
+                waveform=padded.waveform,
+                sample_mask=padded.sample_mask,
                 source_start_sample=remainder_start,
-                source_samples=waveform.shape[0],
             )
         )
     return segments
@@ -155,11 +147,6 @@ def make_inference_segments(
         make_segment(waveform, target, start_sample=start)
         for start in starts
     ]
-
-
-def fit_duration(waveform: np.ndarray, target_samples: int) -> np.ndarray:
-    """기존 호출 호환용 함수: 중앙 crop 또는 오른쪽 padding한 waveform만 반환한다."""
-    return make_segment(waveform, target_samples).waveform
 
 
 def waveform_to_logmel(

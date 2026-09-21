@@ -58,7 +58,7 @@
 
 `--max-steps`는 이번 실행에서 추가할 update의 상한입니다. 재개 시 `--smoke`, `--config`는 함께 지정하지 않으며 저장된 설정을 사용합니다. epoch 상한은 늘릴 수 있고, 데이터 내용이나 학습 설정이 바뀌면 재개를 거부합니다. 이미 early stopping 조건에 도달한 실행은 자동으로 추가 학습하지 않습니다. CPU에서 중간 재개와 연속 실행의 가중치/loss가 정확히 일치하는지 테스트했습니다. 다른 장치나 PyTorch 버전 사이의 수치 일치는 보장하지 않습니다.
 
-전체 학습은 준비가 됐을 때 아래 명령으로 별도 실행합니다. 이번 구현 확인에서는 실행하지 않았습니다.
+새 전체 학습은 아래 명령으로 실행합니다.
 
 ```powershell
 .\.venv\python.exe scripts/train.py --config configs/train.yaml
@@ -66,7 +66,7 @@
 
 기본은 batch 8, AdamW learning rate `1e-4`, 최대 30 epoch, 검증 loss가 5 epoch 연속 개선되지 않으면 중단입니다. early stopping과 best 선택에는 validation만 사용하며 test 배열은 읽거나 평가하지 않습니다.
 
-## 이번 smoke 결과와 해석
+## 현재 확인된 학습 결과와 해석
 
 실제 전처리 manifest는 train 3,218개, validation 433개, test 403개입니다. 이 중 train 16개, validation 8개로 CPU에서 20회 update를 완료했습니다. 결과는 `artifacts/training_smoke/`에 있습니다.
 
@@ -77,4 +77,6 @@
 
 이 결과는 데이터 로딩부터 loss 감소와 저장까지 동작함을 확인합니다. 작은 subset의 noise 예측 loss 감소가 실제 deepvoice 판별 성능을 뜻하지는 않습니다. 화자 ID가 없어 파일 간 같은 화자에 의한 누수는 아직 배제할 수 없습니다. 현재는 원본 파일 단위 분리만 보장합니다.
 
-역방향 sampling, 음성 복원, 이상 점수와 판별 임계값, fake 데이터 비교 및 최종 test 평가는 다음 단계입니다. 학습 시간 추정치는 작은 subset의 측정값을 확대한 참고값이며 전체 파일 읽기와 시스템 부하에 따라 달라집니다.
+전체 real 전처리 데이터로 3 epoch, 1,209회 update한 v2 체크포인트도 `artifacts/training_full_3epoch/`에 있습니다. validation masked MSE는 `0.048117 → 0.041883 → 0.040086`으로 감소했습니다. 이 체크포인트는 WAV 점수화와 평가 흐름을 확인하는 데 사용할 수 있지만, 3 epoch가 최적 학습량이라는 뜻은 아닙니다.
+
+이상 점수와 임계값 평가까지 구현되어 있습니다. 현재 외부 폴더의 fake 라벨은 검증되지 않았으므로 fake 탐지 정확도·F1은 확정할 수 없습니다. 학습량, 점수 설계, 데이터 출처의 영향도 이후 검증 대상입니다.

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .evaluation_data import validate_inventory
+from .evaluation_data import validate_inventory_against_manifest
 from .scoring import ScoreEngine, canonical_hash
 
 
@@ -17,9 +17,13 @@ def calibration_sources(rows: list[dict]) -> list[dict]:
 
 def create_threshold(engine: ScoreEngine, inventory: list[dict], *, purpose: str = "evaluation",
                      selected: list[dict] | None = None) -> tuple[dict, list[dict]]:
-    validate_inventory(inventory)
     if purpose not in {"evaluation", "functional_smoke"}:
         raise ValueError("Unknown threshold purpose")
+    validate_inventory_against_manifest(
+        inventory,
+        Path(engine.config.manifest_path),
+        allow_real_subset=purpose == "functional_smoke",
+    )
     if purpose == "evaluation" and selected is not None:
         raise ValueError("Ordinary calibration must use every real validation source")
     sources = calibration_sources(inventory) if selected is None else selected
@@ -61,11 +65,15 @@ def create_threshold(engine: ScoreEngine, inventory: list[dict], *, purpose: str
 
 def check_threshold(artifact: dict, engine: ScoreEngine, inventory: list[dict],
                     *, allow_smoke: bool = False) -> None:
-    validate_inventory(inventory)
     if artifact.get("schema_version") != 1 or artifact.get("comparison") != "score > threshold":
         raise ValueError("Unsupported threshold format or comparison rule")
     if artifact.get("purpose") != "evaluation" and not (allow_smoke and artifact.get("purpose") == "functional_smoke"):
         raise ValueError("Functional smoke threshold cannot be used for ordinary evaluation")
+    validate_inventory_against_manifest(
+        inventory,
+        Path(engine.config.manifest_path),
+        allow_real_subset=artifact.get("purpose") == "functional_smoke",
+    )
     if artifact.get("binding_hash") != engine.binding_hash or artifact.get("binding") != engine.binding:
         raise ValueError("Threshold model/frontend/scoring binding differs")
     if artifact.get("quantile") != engine.config.quantile or artifact.get("quantile_method") != "inverted_cdf":

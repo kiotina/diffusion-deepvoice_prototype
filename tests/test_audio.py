@@ -1,7 +1,6 @@
 import numpy as np
 
 from deepvoice_diffusion.audio import (
-    fit_duration,
     make_inference_segments,
     make_segment,
     make_training_segments,
@@ -31,15 +30,15 @@ MEL = MelConfig(
 )
 
 
-def test_fit_duration_center_crops() -> None:
+def test_make_segment_center_crops() -> None:
     # 10개 중 중앙 4개인 index 3~6이 선택돼야 한다.
     waveform = np.arange(10, dtype=np.float32)
-    np.testing.assert_array_equal(fit_duration(waveform, 4), [3, 4, 5, 6])
+    np.testing.assert_array_equal(make_segment(waveform, 4).waveform, [3, 4, 5, 6])
 
 
-def test_fit_duration_pads_only_on_the_right() -> None:
+def test_make_segment_pads_only_on_the_right() -> None:
     waveform = np.array([1, 2, 3], dtype=np.float32)
-    np.testing.assert_array_equal(fit_duration(waveform, 6), [1, 2, 3, 0, 0, 0])
+    np.testing.assert_array_equal(make_segment(waveform, 6).waveform, [1, 2, 3, 0, 0, 0])
 
 
 def test_logmel_shape_dtype_and_range() -> None:

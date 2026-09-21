@@ -12,9 +12,9 @@ PowerShell에서 프로젝트 루트를 기준으로 실행한다. smoke는 기�
 
 결과의 `purpose=functional_smoke`는 연결 확인용이다. 이 임계값은 일반 `evaluate` 또는 `predict`에서 거부된다. `metrics.json`의 탐지 성능은 `null`이다.
 
-## 실제 평가 준비와 실행
+## 전체 데이터 모델 평가
 
-아래 절차는 전체 데이터 검증과 학습을 포함하므로 별도로 시간을 잡고 실행한다. 이번 구현 검증에서는 실행하지 않았다.
+전체 real 데이터로 3 epoch 학습한 v2 체크포인트는 `artifacts/training_full_3epoch/best.pt`에 있다. 이 모델로 validation 임계값 산출과 real test·외부 WAV 점수화까지 실행한 결과는 `artifacts/evaluation/full_3epoch_001/`에 있다. real test 182개 중 7개가 임계값을 넘어 real FPR은 약 3.85%였다. 외부 파일은 라벨이 검증되지 않아 fake 탐지 정확도·F1은 계산하지 않았다.
 
 1. `configs/evaluate.yaml`의 경로를 확인한다. `prepare --verify-contract`는 기존 train/validation의 **모든** 저장 Mel·mask를 원본 WAV에서 재현해 비교하고, 성공한 경우에만 `preprocess_contract.json`을 남긴다. 재전처리나 원본 변경은 하지 않는다. `prepare`는 manifest의 원본별 split을 유지한 `inventory.csv`도 만든다.
 
@@ -33,14 +33,14 @@ PowerShell에서 프로젝트 루트를 기준으로 실행한다. smoke는 기�
 3. 새 `best.pt`를 지정해 validation 원본 WAV 전체로 임계값을 만든 뒤, 같은 모델로 real test와 외부 음성을 평가한다. 일반 calibration은 유효한 real validation 파일이 20개 미만이면 실패한다. 예상치 못한 읽기·계산 오류가 있으면 임계값을 저장하지 않는다.
 
    ```powershell
-   .\.venv\python.exe scripts\evaluate.py --output-dir artifacts\evaluation\run_001 --checkpoint artifacts\training_full\best.pt calibrate
-   .\.venv\python.exe scripts\evaluate.py --output-dir artifacts\evaluation\run_001 --checkpoint artifacts\training_full\best.pt evaluate
+   .\.venv\python.exe scripts\evaluate.py --output-dir artifacts\evaluation\run_001 --checkpoint artifacts\training_full_3epoch\best.pt calibrate
+   .\.venv\python.exe scripts\evaluate.py --output-dir artifacts\evaluation\run_001 --checkpoint artifacts\training_full_3epoch\best.pt evaluate
    ```
 
 4. 임의 WAV만 점수화하려면 기존 `inventory.csv`와 `threshold.json`을 가리키고 새 출력 폴더를 사용한다.
 
    ```powershell
-   .\.venv\python.exe scripts\evaluate.py --output-dir artifacts\evaluation\single_001 --checkpoint artifacts\training_full\best.pt --inventory artifacts\evaluation\run_001\inventory.csv --threshold artifacts\evaluation\run_001\threshold.json predict --wav D:\path\sample.wav
+   .\.venv\python.exe scripts\evaluate.py --output-dir artifacts\evaluation\single_001 --checkpoint artifacts\training_full_3epoch\best.pt --inventory artifacts\evaluation\run_001\inventory.csv --threshold artifacts\evaluation\run_001\threshold.json predict --wav D:\path\sample.wav
    ```
 
 기존 checkpoint v1에는 충분한 전처리 정보가 없어 `smoke`에서만 사용할 수 있다. 모델·전처리·점수 설정이나 calibration 파일 지문이 바뀌면 저장된 임계값은 거부된다. 기존 결과 파일은 자동으로 덮어쓰지 않는다.
@@ -54,7 +54,7 @@ PowerShell에서 프로젝트 루트를 기준으로 실행한다. smoke는 기�
 - 검증된 real과 fake가 둘 다 있을 때 파일 단위 혼동행렬(`[real, fake]`), accuracy, precision, recall, F1, real FPR, specificity, balanced accuracy, ROC-AUC를 계산한다. 현재처럼 검증된 fake가 없으면 fake 탐지 지표는 `null`과 사유를 남기고, real FPR은 계산할 수 있다. ROC-AUC에는 선택 의존성 `pip install -e '.[evaluation]'`이 필요하다.
 - `predictions.csv`는 파일 점수·최고 점수·판정·제외/오류 상태, `segments.csv`는 구간별·timestep별 점수, `metrics.json`은 라벨이 검증된 집합의 지표, `run.json`은 실행 목적과 설정·모델 지문을 담는다. JSON의 미정의 수치는 `null`이다.
 
-원본 파일의 경로와 SHA-256으로 중복 또는 split 충돌을 막는다. 화자 ID가 확인되지 않았으므로 화자 독립 성능으로 해석할 수 없다. real과 외부 음성의 출처·녹음 조건 차이도 결과에 영향을 줄 수 있다. 점수 방향이나 집계법을 바꿔야 한다면 별도 개발 집합에서 검토하고, 최종 test 결과에 맞춰 수정하지 않는다.
+원본 파일의 경로와 SHA-256으로 중복을 막고, inventory의 real 경로와 split을 원본 manifest와 다시 대조한다. 따라서 test 파일을 validation으로 바꿔 임계값 산출에 넣는 변경은 거부된다. 화자 ID가 확인되지 않았으므로 화자 독립 성능으로 해석할 수 없다. real과 외부 음성의 출처·녹음 조건 차이도 결과에 영향을 줄 수 있다. 점수 방향이나 집계법을 바꿔야 한다면 별도 개발 집합에서 검토하고, 최종 test 결과에 맞춰 수정하지 않는다.
 
 ## 외부 폴더 라벨을 가정한 임계값 실험
 

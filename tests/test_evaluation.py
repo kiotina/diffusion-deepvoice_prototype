@@ -17,7 +17,11 @@ from deepvoice_diffusion.data_contract import load_verified_contract, verify_pro
 from deepvoice_diffusion.diffusion import masked_mse_per_sample
 from deepvoice_diffusion.evaluation import classify, compute_metrics
 from deepvoice_diffusion.evaluation_config import EvaluationConfig
-from deepvoice_diffusion.evaluation_data import build_inventory, validate_inventory
+from deepvoice_diffusion.evaluation_data import (
+    build_inventory,
+    validate_inventory,
+    validate_inventory_against_manifest,
+)
 from deepvoice_diffusion.model import NoisePredictorUNet
 from deepvoice_diffusion.scoring import ScoreEngine
 from deepvoice_diffusion.training import fit
@@ -112,11 +116,15 @@ def test_wav_length_resampling_zero_and_nonfinite_model(tmp_path):
 
 
 class StubEngine:
-    def __init__(self, scores):
+    def __init__(self, scores, manifest_path):
         self.scores = scores
         self.binding = {"model": "one"}
         self.binding_hash = "one"
-        self.config = type("Config", (), {"quantile": 0.95, "minimum_calibration_files": 20})()
+        self.config = type("Config", (), {
+            "quantile": 0.95,
+            "minimum_calibration_files": 20,
+            "manifest_path": manifest_path,
+        })()
 
     def score_file(self, path):
         return {"status": "scored", "score": self.scores[str(path)]}, []
@@ -129,10 +137,18 @@ def inventory_entry(index, *, split="validation", source="real_manifest", label=
             "evidence": "manifest" if label else "", "sha256": sha or str(index)}
 
 
-def test_calibration_quantile_tie_binding_and_smoke_rejection():
+def test_calibration_quantile_tie_binding_and_smoke_rejection(tmp_path):
     inventory = [inventory_entry(i) for i in range(20)]
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "split,source_path,segment_index,mel_path,mask_path\n" + "".join(
+            f"validation,{row['path']},0,mel_{index}.npy,mask_{index}.npy\n"
+            for index, row in enumerate(inventory)
+        ),
+        encoding="utf-8",
+    )
     scores = {row["path"]: float(i) for i, row in enumerate(inventory)}
-    engine = StubEngine(scores)
+    engine = StubEngine(scores, manifest)
     artifact, measured = create_threshold(engine, inventory)
     assert len(measured) == 20
     assert artifact["threshold"] == 18.0
@@ -164,6 +180,20 @@ def test_inventory_duplicates_and_unverified_labels():
         validate_inventory([rows[0], {**rows[1], "path": rows[0]["path"]}])
     with pytest.raises(ValueError, match="evidence"):
         validate_inventory([rows[0], {**rows[1], "label": "1", "label_status": "verified"}])
+
+
+def test_inventory_real_split_must_match_manifest(tmp_path):
+    source = tmp_path / "real.wav"
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "split,source_path,segment_index,mel_path,mask_path\n"
+        f"test,{source},0,mel.npy,mask.npy\n",
+        encoding="utf-8",
+    )
+    row = inventory_entry(1, split="validation")
+    row["path"] = str(source)
+    with pytest.raises(ValueError, match="split differs"):
+        validate_inventory_against_manifest([row], manifest)
 
 
 def test_external_folder_name_does_not_create_fake_truth(tmp_path):

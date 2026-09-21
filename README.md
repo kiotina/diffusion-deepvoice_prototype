@@ -2,7 +2,7 @@
 
 Real 음성만으로 diffusion 기반 deepvoice 이상 탐지를 검증하기 위한 최소 프로토타입입니다.
 
-원본 WAV를 고정 크기 log-Mel spectrogram으로 전처리하고, PyTorch U-Net이 diffusion 과정에서 추가한 noise를 예측하도록 학습합니다. WAV 이상 점수·임계값 판정·파일 단위 평가 기능을 제공하지만, 현재 smoke 모델과 미확인 외부 음성으로 실제 deepfake 탐지 성능은 확정할 수 없습니다.
+원본 WAV를 고정 크기 log-Mel spectrogram으로 전처리하고, PyTorch U-Net이 diffusion 과정에서 추가한 noise를 예측하도록 학습합니다. 전체 real 데이터로 3 epoch 학습한 기능 검증용 모델과 WAV 이상 점수·임계값 판정·파일 단위 평가 기능이 있습니다. 외부 음성의 fake 라벨이 검증되지 않았으므로 실제 deepfake 탐지 성능은 아직 확정할 수 없습니다.
 
 ## 확인된 데이터
 
@@ -48,6 +48,8 @@ python scripts\preprocess.py
 python scripts\preprocess.py --limit 8 --output-dir data/processed/smoke
 pytest
 ```
+
+전처리는 기존 산출물이 섞이는 일을 막기 위해 출력 폴더가 없거나 비어 있을 때만 시작합니다. 재실행할 때는 새 출력 폴더를 지정하세요.
 
 생성 결과는 `data/processed/`와 `artifacts/` 아래에 저장되며 Git 추적 대상에서 제외됩니다.
 
