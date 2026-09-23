@@ -10,6 +10,7 @@ import yaml
 
 @dataclass(frozen=True)
 class EvaluationConfig:
+    """평가 파일·모델·점수 계산·임계값 설정을 모은다."""
     manifest_path: Path
     preprocess_config: Path
     external_dir: Path
@@ -24,6 +25,7 @@ class EvaluationConfig:
     minimum_calibration_files: int = 20
 
     def __post_init__(self):
+        """평가 단계와 seed, 임계값 설정이 유효한지 검사한다."""
         for name in ("manifest_path", "preprocess_config", "external_dir", "checkpoint", "output_dir"):
             if not isinstance(getattr(self, name), Path):
                 raise ValueError(f"{name} must be a path")
@@ -43,6 +45,7 @@ class EvaluationConfig:
             raise ValueError("quantile must be between 0 and 1")
 
     def scoring_settings(self) -> dict:
+        """점수 계산 규칙을 체크포인트·임계값 결합 정보에 넣을 형태로 만든다."""
         return {"timesteps": list(self.timesteps), "noise_seeds": list(self.noise_seeds),
                 "segment_aggregation": "arithmetic_mean", "noise_metric": "masked_mse_per_sample",
                 "noise_reuse": "same_two_cpu_tensors_all_segments_and_timesteps",
@@ -50,6 +53,7 @@ class EvaluationConfig:
 
 
 def load_evaluation_config(path: str | Path) -> EvaluationConfig:
+    """평가 YAML과 상대 경로를 읽어 검증된 설정 객체를 만든다."""
     path = Path(path).resolve()
     project_root = path.parent.parent
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -61,6 +65,7 @@ def load_evaluation_config(path: str | Path) -> EvaluationConfig:
     if set(raw) - allowed:
         raise ValueError(f"Unknown evaluation settings: {sorted(set(raw)-allowed)}")
     def path_value(key):
+        """YAML 경로 하나를 프로젝트 루트 기준 절대 경로로 바꾼다."""
         value = raw.get(key)
         if value is None:
             return None
@@ -79,6 +84,7 @@ def load_evaluation_config(path: str | Path) -> EvaluationConfig:
 
 
 def override_paths(config: EvaluationConfig, *, checkpoint=None, output_dir=None) -> EvaluationConfig:
+    """명령행에서 지정한 체크포인트·출력 경로만 설정에 덮어쓴다."""
     return replace(config,
                    checkpoint=Path(checkpoint).resolve() if checkpoint else config.checkpoint,
                    output_dir=Path(output_dir).resolve() if output_dir else config.output_dir)

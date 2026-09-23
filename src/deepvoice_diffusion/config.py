@@ -35,11 +35,13 @@ class AudioConfig:
 
     @property
     def target_samples(self) -> int:
+        """모델 입력 한 구간의 길이를 초에서 sample 수로 바꾼다."""
         # 현재 설정에서는 16,000 Hz × 2초 = 모델 입력 한 구간의 32,000 sample이다.
         return round(self.sample_rate * self.duration_seconds)
 
     @property
     def inference_hop_samples(self) -> int:
+        """평가 창의 이동 간격을 겹침 길이를 반영해 sample 수로 바꾼다."""
         return round(
             self.sample_rate
             * (self.duration_seconds - self.inference_overlap_seconds)
@@ -47,10 +49,12 @@ class AudioConfig:
 
     @property
     def segment_hop_samples(self) -> int:
+        """학습 구간의 이동 간격을 sample 수로 바꾼다."""
         return round(self.sample_rate * self.segment_hop_seconds)
 
     @property
     def minimum_remainder_samples(self) -> int:
+        """살릴 수 있는 마지막 잔여 구간의 최소 길이를 sample 수로 바꾼다."""
         return round(self.sample_rate * self.minimum_remainder_seconds)
 
 

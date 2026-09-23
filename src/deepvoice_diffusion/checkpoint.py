@@ -9,6 +9,7 @@ import torch
 
 
 def save_checkpoint(path: Path, model, optimizer, state, config, fingerprints, preprocess_contract=None):
+    """가중치와 재개에 필요한 상태를 임시 파일에 저장한 뒤 교체한다."""
     payload = {
         "format_version": 2 if preprocess_contract is not None else 1,
         "model": model.state_dict(),
@@ -30,6 +31,7 @@ def save_checkpoint(path: Path, model, optimizer, state, config, fingerprints, p
 
 
 def load_checkpoint(path: Path):
+    """체크포인트를 CPU로 읽고 지원하는 형식인지 검사한다."""
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if payload.get("format_version") not in {1, 2}:
         raise ValueError("Unsupported checkpoint format")
@@ -39,6 +41,7 @@ def load_checkpoint(path: Path):
 
 
 def restore_checkpoint(payload, model, optimizer):
+    """모델·optimizer·난수 상태를 되살리고 학습 위치를 반환한다."""
     model.load_state_dict(payload["model"])
     optimizer.load_state_dict(payload["optimizer"])
     torch.set_rng_state(payload["torch_rng"])

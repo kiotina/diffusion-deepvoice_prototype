@@ -23,6 +23,7 @@ class AudioSegment:
     source_start_sample: int
     @property
     def valid_samples(self) -> int:
+        """padding을 제외하고 실제 음성이 들어 있는 sample 수를 반환한다."""
         return int(self.sample_mask.sum())
 
 

@@ -18,6 +18,7 @@ from .training_data import read_manifest
 
 
 def sha256_file(path: str | Path) -> str:
+    """파일 내용을 SHA-256 지문으로 요약해 변경 여부를 확인할 수 있게 한다."""
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
@@ -26,6 +27,7 @@ def sha256_file(path: str | Path) -> str:
 
 
 def frontend(config: PrototypeConfig) -> dict:
+    """Mel 입력을 만든 전처리 규칙과 라이브러리 버전을 기록한다."""
     return {
         "audio": asdict(config.audio),
         "mel": asdict(config.mel),
@@ -40,6 +42,7 @@ def frontend(config: PrototypeConfig) -> dict:
 
 
 def contract_path(manifest_path: str | Path) -> Path:
+    """manifest 옆에 둘 전처리 검증 결과 파일 경로를 반환한다."""
     return Path(manifest_path).resolve().parent / "preprocess_contract.json"
 
 
@@ -86,6 +89,7 @@ def verify_processed_data(manifest_path: str | Path, config: PrototypeConfig) ->
 
 
 def load_verified_contract(manifest_path: str | Path) -> dict | None:
+    """저장된 계약과 현재 원본·Mel·mask의 지문이 같은지 확인한다."""
     path = contract_path(manifest_path)
     if not path.is_file():
         return None

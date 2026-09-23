@@ -12,12 +12,14 @@ from .scoring import ScoreEngine, canonical_hash
 
 
 def calibration_sources(rows: list[dict]) -> list[dict]:
+    """평가 목록에서 real validation 파일만 안정적인 순서로 고른다."""
     return sorted((row for row in rows if row["source"] == "real_manifest" and row["split"] == "validation"),
                   key=lambda row: row["file_id"])
 
 
 def create_threshold(engine: ScoreEngine, inventory: list[dict], *, purpose: str = "evaluation",
                      selected: list[dict] | None = None) -> tuple[dict, list[dict]]:
+    """real validation 파일 점수의 지정 분위수로 임계값을 만든다."""
     if purpose not in {"evaluation", "functional_smoke"}:
         raise ValueError("Unknown threshold purpose")
     validate_inventory_against_manifest(
@@ -48,6 +50,7 @@ def create_threshold(engine: ScoreEngine, inventory: list[dict], *, purpose: str
     values = np.array([entry["score"] for entry in scored], dtype=np.float64)
     if not np.isfinite(values).all():
         raise FloatingPointError("Non-finite calibration score")
+    # test 점수는 사용하지 않고 real validation 파일 점수만으로 임계값을 정한다.
     threshold = float(np.quantile(values, engine.config.quantile, method="inverted_cdf"))
     artifact = {
         "schema_version": 1, "purpose": purpose, "binding": engine.binding,
@@ -66,6 +69,7 @@ def create_threshold(engine: ScoreEngine, inventory: list[dict], *, purpose: str
 
 def check_threshold(artifact: dict, engine: ScoreEngine, inventory: list[dict],
                     *, allow_smoke: bool = False) -> None:
+    """저장된 임계값이 현재 모델·점수 설정·validation 파일과 맞는지 검사한다."""
     if artifact.get("schema_version") != 1 or artifact.get("comparison") != "score > threshold":
         raise ValueError("Unsupported threshold format or comparison rule")
     if artifact.get("purpose") != "evaluation" and not (allow_smoke and artifact.get("purpose") == "functional_smoke"):
@@ -96,9 +100,11 @@ def check_threshold(artifact: dict, engine: ScoreEngine, inventory: list[dict],
 
 
 def save_threshold(path: Path, artifact: dict) -> None:
+    """임계값과 계산 근거를 새 JSON 파일로 저장한다."""
     with path.open("x", encoding="utf-8") as handle:
         json.dump(artifact, handle, ensure_ascii=False, indent=2, allow_nan=False)
 
 
 def load_threshold(path: Path) -> dict:
+    """저장된 임계값 JSON을 읽는다."""
     return json.loads(path.read_text(encoding="utf-8"))

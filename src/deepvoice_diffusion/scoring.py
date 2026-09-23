@@ -19,12 +19,16 @@ from .model import NoisePredictorUNet
 
 
 def canonical_hash(value: dict) -> str:
+    """설정 dict를 일정한 순서의 JSON으로 바꿔 SHA-256 지문을 만든다."""
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
                                      ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
 
 
 class ScoreEngine:
+    """체크포인트와 고정 noise를 사용해 WAV의 이상 점수를 계산한다."""
+
     def __init__(self, config: EvaluationConfig, *, legacy_smoke: bool = False):
+        """모델·전처리 설정을 검증하고 평가용 noise와 결합 지문을 준비한다."""
         self.config = config
         self.preprocess = load_config(config.preprocess_config)
         self.payload = load_checkpoint(config.checkpoint)
@@ -75,6 +79,7 @@ class ScoreEngine:
 
     @torch.inference_mode()
     def score_file(self, path: str | Path) -> tuple[dict, list[dict]]:
+        """WAV의 구간별 masked MSE를 평균해 파일 점수와 상세 기록을 반환한다."""
         path = Path(path).resolve()
         waveform = load_waveform(path, self.preprocess.audio)
         if waveform.shape[0] < self.preprocess.audio.minimum_remainder_samples:
@@ -85,6 +90,7 @@ class ScoreEngine:
                     "segment_count": 0}, []
         segments = make_inference_segments(waveform, self.preprocess.audio)
         records: list[dict] = []
+        # 모든 구간을 같은 고정 timestep·noise로 측정해 우연한 차이를 줄인다.
         for start in range(0, len(segments), self.config.batch_size):
             chunk = [segment_to_logmel(segment, self.preprocess.audio, self.preprocess.mel)
                      for segment in segments[start:start + self.config.batch_size]]
@@ -114,5 +120,6 @@ class ScoreEngine:
                                 "valid_seconds": segment.valid_samples / self.preprocess.audio.sample_rate,
                                 "score": float(np.mean(list(values.values()))), **values})
         scores = [row["score"] for row in records]
+        # 구간 평균이 파일 대표 점수이며 최고 구간 점수는 보조 정보다.
         return {"status": "scored", "score": float(np.mean(scores)),
                 "max_score": float(np.max(scores)), "segment_count": len(records)}, records

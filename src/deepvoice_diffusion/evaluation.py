@@ -11,6 +11,7 @@ from .scoring import ScoreEngine
 
 
 def classify(score: float, threshold: float) -> tuple[int, str]:
+    """파일 점수가 임계값을 초과하면 이상으로 판정한다."""
     if not math.isfinite(score) or not math.isfinite(threshold):
         raise ValueError("Classification requires finite score and threshold")
     above = int(score > threshold)
@@ -18,6 +19,7 @@ def classify(score: float, threshold: float) -> tuple[int, str]:
 
 
 def score_entries(engine: ScoreEngine, rows: list[dict], threshold: float) -> tuple[list[dict], list[dict]]:
+    """파일 목록을 점수화하고 파일별 판정과 구간별 기록을 모은다."""
     predictions, segments = [], []
     for entry in rows:
         record = {key: entry[key] for key in ("file_id", "path", "source", "split", "label", "label_status")}
@@ -41,6 +43,7 @@ def score_entries(engine: ScoreEngine, rows: list[dict], threshold: float) -> tu
 
 
 def compute_metrics(predictions: list[dict]) -> dict:
+    """검증된 라벨의 파일만 사용해 혼동행렬과 분류 지표를 계산한다."""
     known = [row for row in predictions if row["label_status"] == "verified" and row["label"] in {"0", "0.0", 0, "1", "1.0", 1}]
     valid = [row for row in known if row["status"] == "scored"]
     real = [row for row in valid if int(float(row["label"])) == 0]
@@ -92,11 +95,13 @@ def compute_metrics(predictions: list[dict]) -> dict:
 
 
 def write_json_new(path: Path, value: dict) -> None:
+    """기존 결과를 덮어쓰지 않고 JSON을 새로 저장한다."""
     with path.open("x", encoding="utf-8") as handle:
         json.dump(value, handle, ensure_ascii=False, indent=2, allow_nan=False)
 
 
 def write_csv_new(path: Path, rows: list[dict], fields: list[str]) -> None:
+    """지정한 열 순서로 새 CSV를 저장하며 추가 필드는 제외한다."""
     with path.open("x", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()

@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 @dataclass(frozen=True)
 class TrainingConfig:
+    """학습 데이터·모델·optimizer·저장 조건을 한곳에 모은다."""
     manifest_path: str = "data/processed/real_mels_2s/manifest.csv"
     output_dir: str = "artifacts/training"
     base_channels: int = 32
@@ -36,6 +37,7 @@ class TrainingConfig:
     validation_limit: int | None = None
 
     def __post_init__(self):
+        """잘못된 학습 설정으로 실행되기 전에 값의 범위를 검사한다."""
         for name in ("base_channels", "time_dim", "timesteps", "batch_size", "epochs",
                      "patience", "cpu_threads", "checkpoint_every"):
             value = getattr(self, name)
@@ -63,11 +65,13 @@ class TrainingConfig:
 
 
 def project_path(value: str | Path) -> Path:
+    """상대 경로를 프로젝트 루트 기준 절대 경로로 바꾼다."""
     path = Path(value).expanduser()
     return path.resolve() if path.is_absolute() else (PROJECT_ROOT / path).resolve()
 
 
 def load_training_config(path: str | Path) -> TrainingConfig:
+    """학습 YAML을 읽어 TrainingConfig를 만들고 알 수 없는 설정을 거부한다."""
     with Path(path).open(encoding="utf-8") as handle:
         raw = yaml.safe_load(handle)
     if not isinstance(raw, dict):

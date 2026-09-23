@@ -22,12 +22,14 @@ from .training_data import MelDataset, read_manifest
 
 
 def write_json(path, value):
+    """JSON을 임시 파일에 쓴 뒤 교체해 중간 저장 파일을 피한다."""
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     os.replace(temporary, path)
 
 
 def choose_device(requested):
+    """요청한 CPU/CUDA 장치를 선택하고 사용 불가능한 CUDA 요청을 거부한다."""
     if requested == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA requested but unavailable; install the correct build or use CPU")
     return torch.device("cuda" if requested == "auto" and torch.cuda.is_available() else
@@ -36,6 +38,7 @@ def choose_device(requested):
 
 @torch.inference_mode()
 def evaluate(model, dataset, schedule, config, device):
+    """가중치를 수정하지 않고 고정 noise로 validation loss를 계산한다."""
     model.eval()
     total, count = 0.0, 0.0
     # 별도 generator 사용: 검증 loader가 학습의 전역 RNG를 소모하지 않는다.
@@ -54,6 +57,7 @@ def evaluate(model, dataset, schedule, config, device):
 
 
 def save_history(output_dir, history):
+    """epoch별 학습·검증 loss를 JSON, CSV, 그래프로 남긴다."""
     write_json(output_dir / "history.json", history)
     with (output_dir / "history.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=["epoch", "step", "train_loss", "validation_loss"])
@@ -76,14 +80,17 @@ def save_history(output_dir, history):
 def train_step(model, optimizer, schedule, batch, config, device, epoch):
     """학습 배치 하나에 noise를 넣고 예측 오차로 가중치를 한 번 수정한다."""
     mel, mask = batch["mel"].to(device), batch["mask"].to(device)
+    # 각 구간의 timestep과 정답 noise를 정하고 noisy Mel을 만든다.
     steps, noise = seeded_noise(mel, batch["index"], schedule.timesteps, config.seed, epoch)
     optimizer.zero_grad(set_to_none=True)
     noisy = schedule.add_noise(mel, steps, noise, mask)
     prediction = model(noisy, steps, mask)
+    # padding 프레임은 빼고 예측 noise와 실제 noise의 오차를 계산한다.
     error, valid_count = masked_error(prediction, noise, mask)
     loss = error / valid_count
     if not torch.isfinite(loss):
         raise FloatingPointError("Non-finite training loss; resume from last.pt after diagnosis")
+    # 역전파로 기울기를 구하고, 큰 기울기를 제한한 뒤 가중치를 수정한다.
     loss.backward()
     torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clip, error_if_nonfinite=True)
     optimizer.step()
@@ -161,6 +168,7 @@ def fit(config: TrainingConfig, *, resume: Path | None = None, max_steps: int | 
     invocation_start = time.perf_counter()
 
     def save_last():
+        """현재 배치 위치와 모델 상태를 last.pt에 저장한다."""
         save_checkpoint(output_dir / "last.pt", model, optimizer, state, asdict(config),
                         fingerprints, preprocess_contract)
 
@@ -171,6 +179,7 @@ def fit(config: TrainingConfig, *, resume: Path | None = None, max_steps: int | 
             break
         epoch = state["epoch"]
         generator = torch.Generator().manual_seed(config.seed + epoch)
+        # epoch마다 순서를 다시 섞되 배치 위치를 저장해 중간 재개가 가능하게 한다.
         order = torch.randperm(len(train), generator=generator).tolist()
         batches = [order[i:i+config.batch_size] for i in range(0, len(order), config.batch_size)]
         loader = DataLoader(train, batch_sampler=batches[state["batch_cursor"]:],
@@ -195,6 +204,7 @@ def fit(config: TrainingConfig, *, resume: Path | None = None, max_steps: int | 
 
         if state["batch_cursor"] == len(batches):
             tick = time.perf_counter()
+            # validation은 가중치를 바꾸지 않고 best 모델 선택에만 사용한다.
             validation_loss = evaluate(model, validation, schedule, config, device)
             validation_seconds += time.perf_counter() - tick
             row = dict(epoch=epoch, step=state["step"],

@@ -20,6 +20,7 @@ def file_id(path: Path) -> str:
 
 def build_inventory(manifest_path: Path, external_dir: Path,
                     verified_fake_manifest: Path | None = None) -> list[dict[str, str]]:
+    """real manifest와 외부 WAV를 합쳐 파일별 경로·split·라벨 상태를 만든다."""
     rows = read_manifest(manifest_path)
     real: dict[str, str] = {}
     for row in rows:
@@ -63,6 +64,7 @@ def build_inventory(manifest_path: Path, external_dir: Path,
 
 
 def validate_inventory(rows: list[dict[str, str]], *, check_files: bool = False) -> None:
+    """평가 목록의 중복 경로·내용과 real/external 라벨 규칙을 검사한다."""
     if not rows:
         raise ValueError("Inventory is empty")
     paths: dict[str, dict] = {}
@@ -131,6 +133,7 @@ def validate_inventory_against_manifest(
 
 
 def write_inventory(path: Path, rows: list[dict[str, str]]) -> None:
+    """평가 파일 목록을 새 CSV로 저장하며 기존 파일은 덮어쓰지 않는다."""
     with path.open("x", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=INVENTORY_FIELDS)
         writer.writeheader()
@@ -138,6 +141,7 @@ def write_inventory(path: Path, rows: list[dict[str, str]]) -> None:
 
 
 def read_inventory(path: Path, *, check_files: bool = True) -> list[dict[str, str]]:
+    """평가 목록 CSV를 읽고 선택적으로 원본 파일 지문도 확인한다."""
     with path.open(encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         rows = list(reader)

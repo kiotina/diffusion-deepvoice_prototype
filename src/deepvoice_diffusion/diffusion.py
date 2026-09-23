@@ -9,18 +9,24 @@ from torch import nn
 
 
 class DiffusionSchedule(nn.Module):
+    """timestep별 noise 양을 보관하고 원본 Mel에 noise를 섞는다."""
+
     def __init__(self, timesteps: int = 1000, beta_start: float = 1e-4, beta_end: float = 0.02):
+        """beta에서 단계별 누적 원본 비율 alpha_bar를 계산해 저장한다."""
         super().__init__()
         if timesteps < 2 or not 0 < beta_start < beta_end < 1:
             raise ValueError("Require timesteps >= 2 and 0 < beta_start < beta_end < 1")
         self.timesteps = timesteps
         betas = torch.linspace(beta_start, beta_end, timesteps)
+        # alpha_bar[t]는 원본 Mel이 t단계까지 얼마나 남는지 나타낸다.
         self.register_buffer("alpha_bars", torch.cumprod(1 - betas, dim=0))
 
     def add_noise(self, clean, timesteps, noise, mask):
+        """각 Mel에 선택된 단계의 noise를 섞고 padding 위치는 -1로 유지한다."""
         if noise.shape != clean.shape or timesteps.shape != (clean.shape[0],):
             raise ValueError("Noise or timestep shape does not match batch")
         alpha = self.alpha_bars[timesteps][:, None, None, None]
+        # 원본과 실제 noise를 정해진 비율로 섞는다. U-Net이 맞힐 정답은 noise다.
         noisy = alpha.sqrt() * clean + (1 - alpha).sqrt() * noise
         # Mel의 -1은 정규화 범위의 바닥값이다. 빈 프레임은 항상 이 값으로 둔다.
         return torch.where(mask.bool(), noisy, -1.0)
@@ -42,6 +48,7 @@ def masked_error(prediction, target, mask):
 
 
 def masked_mse(prediction, target, mask):
+    """유효한 Mel 위치의 제곱오차 합을 유효 원소 수로 나눈다."""
     error, count = masked_error(prediction, target, mask)
     return error / count
 

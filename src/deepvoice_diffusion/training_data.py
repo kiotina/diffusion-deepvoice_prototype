@@ -15,6 +15,7 @@ MASK_SHAPE = (1, 1, 126)
 
 
 def read_manifest(path: str | Path) -> list[dict[str, str]]:
+    """Mel·mask 목록을 읽고 원본 파일의 split 중복과 경로 재사용을 막는다."""
     path = Path(path).resolve()
     with path.open(encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -53,7 +54,10 @@ def read_manifest(path: str | Path) -> list[dict[str, str]]:
 
 
 class MelDataset(Dataset):
+    """manifest의 한 split에서 Mel·mask 배열을 학습 배치용으로 제공한다."""
+
     def __init__(self, rows: list[dict[str, str]], split: str, limit: int | None = None):
+        """원하는 split의 행만 선택하고 선택적 smoke 개수 제한을 적용한다."""
         if split not in {"train", "validation", "test"}:
             raise ValueError(f"Invalid split: {split}")
         if limit is not None and limit < 1:
@@ -66,9 +70,11 @@ class MelDataset(Dataset):
         self.split = split
 
     def __len__(self) -> int:
+        """현재 split에서 사용할 Mel 구간 수를 반환한다."""
         return len(self.rows)
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor | int]:
+        """Mel·mask를 읽고 shape·값을 검사한 뒤 텐서와 index를 반환한다."""
         row = self.rows[index]
         mel = np.load(row["mel_path"], allow_pickle=False)
         mask = np.load(row["mask_path"], allow_pickle=False)
